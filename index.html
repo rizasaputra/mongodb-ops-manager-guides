@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ops Manager Testing Guides</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --sidebar-bg: #f5f6f7;
+      --border: #e2e4e8;
+      --text: #1a1a1a;
+      --muted: #6b7280;
+      --accent: #00684a;
+      --accent-soft: #e3f1ec;
+      --code-bg: #f4f5f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      display: flex;
+      min-height: 100vh;
+    }
+    #sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    #sidebar h1 {
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 0 24px 16px;
+    }
+    #sidebar .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 0 24px 4px;
+    }
+    #sidebar .subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 24px 20px;
+    }
+    nav a {
+      display: block;
+      padding: 9px 24px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      border-left: 3px solid transparent;
+      line-height: 1.35;
+    }
+    nav a .num {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      margin-right: 8px;
+    }
+    nav a:hover { background: #ececee; }
+    nav a.active {
+      background: var(--accent-soft);
+      border-left-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    nav a.active .num { color: var(--accent); }
+    #content {
+      flex: 1;
+      padding: 48px 64px;
+      max-width: 900px;
+      overflow-x: auto;
+    }
+    #content h1 { font-size: 30px; margin-top: 0; }
+    #content h2 { margin-top: 2em; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    #content h3 { margin-top: 1.6em; }
+    #content p, #content li { line-height: 1.65; }
+    #content code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.88em;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+    }
+    #content pre {
+      background: var(--code-bg);
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+    }
+    #content pre code { background: none; padding: 0; }
+    #content table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    #content th, #content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; font-size: 14px; }
+    #content th { background: var(--sidebar-bg); }
+    #content blockquote {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      margin: 1em 0;
+      padding: 12px 18px;
+      border-radius: 0 6px 6px 0;
+    }
+    #content blockquote p { margin: 0.4em 0; }
+    #content a { color: var(--accent); }
+    .loading, .error { color: var(--muted); font-style: italic; }
+    .error { color: #b42318; }
+  </style>
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">Ops Manager</div>
+    <div class="subtitle">Testing &amp; setup guides</div>
+    <h1>Guides</h1>
+    <nav id="nav"></nav>
+  </aside>
+  <main id="content">
+    <p class="loading">Loading…</p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const GUIDES = [
+      { num: "00", file: "00-install-ops-manager.md", title: "Install Ops Manager" },
+      { num: "10", file: "10-provision-new.md", title: "Provision a new replica set" },
+      { num: "20", file: "20-monitoring-new-and-alerting.md", title: "Monitor new & test alerting" },
+      { num: "25", file: "25-monitoring-existing.md", title: "Monitor existing & Performance Advisor" },
+      { num: "30", file: "30-automation-no-downtime.md", title: "Change a parameter, no downtime" },
+      { num: "40", file: "40-native-backup.md", title: "Native backup & restore" },
+      { num: "45", file: "45-backup-restore-third-party.md", title: "Backup & restore (third-party / Dell)" },
+      { num: "50", file: "50-database-audit-log.md", title: "Database audit log" },
+      { num: "60", file: "60-uninstall-ops-manager.md", title: "Uninstall Ops Manager (safe)" },
+    ];
+
+    const nav = document.getElementById("nav");
+    const content = document.getElementById("content");
+
+    GUIDES.forEach((g) => {
+      const a = document.createElement("a");
+      a.href = "#" + g.file;
+      a.dataset.file = g.file;
+      a.innerHTML = '<span class="num">' + g.num + '</span>' + g.title;
+      nav.appendChild(a);
+    });
+
+    async function load(file) {
+      const guide = GUIDES.find((g) => g.file === file) || GUIDES[0];
+      document.querySelectorAll("#nav a").forEach((a) =>
+        a.classList.toggle("active", a.dataset.file === guide.file)
+      );
+      content.innerHTML = '<p class="loading">Loading…</p>';
+      try {
+        const res = await fetch(guide.file);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const md = await res.text();
+        content.innerHTML = marked.parse(md);
+        content.scrollTop = 0;
+        window.scrollTo(0, 0);
+      } catch (e) {
+        content.innerHTML =
+          '<p class="error">Could not load ' + guide.file + " (" + e.message +
+          "). Serve this folder over HTTP (see README) rather than opening the file directly.</p>";
+      }
+    }
+
+    function current() {
+      const hash = decodeURIComponent(location.hash.replace(/^#/, ""));
+      return GUIDES.some((g) => g.file === hash) ? hash : GUIDES[0].file;
+    }
+
+    window.addEventListener("hashchange", () => load(current()));
+    load(current());
+  </script>
+</body>
+</html>
