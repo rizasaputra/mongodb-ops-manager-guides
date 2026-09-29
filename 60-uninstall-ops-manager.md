@@ -205,7 +205,7 @@ Only after every deployment is released from Ops Manager.
 On `opsmgr-1`:
 
 ```bash
-sudo service mongodb-mms stop
+sudo systemctl stop mongodb-mms
 ```
 
 ### 8. Uninstall the Ops Manager package
@@ -218,7 +218,13 @@ sudo rpm -e mongodb-mms
 
 The Application Database holds only Ops Manager's own metadata, not your production data, so it is safe to remove once Ops Manager is gone.
 
-1. Stop the Application Database `mongod` on `opsmgr-1`.
+1. Stop the Application Database `mongod` on `opsmgr-1`, and disable it so it does not
+   start again on reboot:
+
+   ```bash
+   sudo systemctl disable --now mongod
+   ```
+
 2. If you no longer need any of it, remove the data directories you created (for example `/data/appdb`, the backup head directory, and any file system snapshot store path).
 
 ### 10. Close firewall rules opened for Ops Manager (optional)

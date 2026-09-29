@@ -188,13 +188,28 @@ Install the latest 8.0 Enterprise release, which the Application Database uses:
 sudo dnf install -y mongodb-enterprise
 ```
 
-### 4. Disable the default mongod service
+### 4. Make sure nothing else is using port 27017
 
-Ops Manager connects to its Application Database on port `27017`. If a `mongod` is already running on this host, disable it so it does not conflict:
+The `mongodb-enterprise` package ships a systemd service unit named `mongod`
+(`/usr/lib/systemd/system/mongod.service`). You will run the Application Database
+through **that unit** in step 7, because it already applies MongoDB's recommended
+resource limits (open files, processes) for you. Do not disable or mask it.
+
+Ops Manager connects to its Application Database on port `27017`, so make sure no other
+`mongod` is already running and holding that port. Check for a running process:
 
 ```bash
-sudo systemctl disable mongod
+pgrep -ax mongod
 ```
+
+If a `mongod` from an earlier attempt is running (for example one started by hand), stop
+it before continuing so it does not conflict with the service you start in step 7:
+
+```bash
+sudo pkill -x mongod
+```
+
+If nothing is printed by `pgrep`, there is no conflict and you can continue.
 
 ### 5. Create the Application Database data directory
 
@@ -223,7 +238,6 @@ storage:
     engineConfig:
       cacheSizeGB: 1
 processManagement:
-  fork: true
   timeZoneInfo: /usr/share/zoneinfo
   pidFilePath: /var/run/mongodb/mongod.pid
 net:
@@ -235,12 +249,34 @@ setParameter:
 
 Save the file when done.
 
-### 7. Start the Application Database
+### 7. Start the Application Database with systemd
 
-Start `mongod` as the `mongod` user using the configuration file:
+Start `mongod` through the systemd unit that came with the package, and enable it so the
+Application Database comes back automatically after a reboot:
 
 ```bash
-sudo -u mongod mongod -f /etc/mongod.conf
+sudo systemctl enable --now mongod
+```
+
+Using the service unit (instead of launching `mongod` by hand) matters for two reasons:
+
+- **Resource limits are correct.** The unit sets `LimitNOFILE=64000` and
+  `LimitNPROC=64000` — MongoDB's recommended limits. A hand-started `mongod` instead
+  inherits your login shell's limits, which on RHEL default to only `1024` open files.
+  That is far too low for the Application Database (Ops Manager stores its own logs there
+  as many daily collections), and it makes `mongod` hit "Too many open files" and crash
+  with a WiredTiger `WT_PANIC` once enough `.wt` files are open.
+- **It survives reboots.** With `enable`, the Application Database starts on boot instead
+  of leaving Ops Manager without its backing database.
+
+Confirm `mongod` is running and listening on `127.0.0.1:27017`:
+
+```bash
+sudo systemctl status mongod --no-pager
+```
+
+```bash
+sudo ss -tlnp | grep 27017
 ```
 
 ### 8. Raise the process limit for the Ops Manager user
@@ -354,10 +390,10 @@ This installs Ops Manager under `/opt/mongodb/mms/`, creates the `mongodb-mms` s
 
 ### 12. Start Ops Manager
 
-Start the Ops Manager service:
+Start the Ops Manager service through systemd:
 
 ```bash
-sudo service mongodb-mms start
+sudo systemctl start mongodb-mms
 ```
 
 The first startup takes a few minutes (the JVM starts and Ops Manager migrates its
@@ -376,27 +412,30 @@ sudo ss -tlnp | grep 8080
 
 **If the console never comes up, check the Application Database first.** Ops Manager
 cannot start without it, and the tell-tale sign is repeated `Connection refused` to
-`127.0.0.1:27017` in `mms0.log`. The Application Database `mongod` you started in step 7
-must be running:
+`127.0.0.1:27017` in `mms0.log`. Confirm the Application Database `mongod` you started in
+step 7 is running and listening:
+
+```bash
+sudo systemctl status mongod --no-pager
+```
 
 ```bash
 sudo ss -tlnp | grep 27017
 ```
 
-If that is empty, `mongod` is not running — start it again, then restart Ops Manager so
-it reconnects:
+If `mongod` is not running, start it again, then restart Ops Manager so it reconnects:
 
 ```bash
-sudo -u mongod mongod -f /etc/mongod.conf
+sudo systemctl start mongod
 ```
 
 ```bash
-sudo service mongodb-mms restart
+sudo systemctl restart mongodb-mms
 ```
 
-Note: this test setup starts `mongod` manually, so it does not survive a reboot or a
-crash. If Ops Manager loses its Application Database, it stops working until `mongod` is
-back and Ops Manager is restarted. Keep `mongod` running the whole time Ops Manager is up.
+Because you started `mongod` through systemd with `enable` in step 7, the Application
+Database comes back automatically after a reboot, and Ops Manager reconnects to it on its
+own restart. If you ever see the `Connection refused` errors above, check `mongod` first.
 
 ### 13. Register the first user
 
@@ -526,11 +565,16 @@ for example provisioning a new replica set in `10-provision-new.md`.
 
 Confirm the setup works:
 
-- The `mongod` process for the Application Database is running and listening on `127.0.0.1:27017`.
+- The `mongod` process for the Application Database is running and listening on `127.0.0.1:27017`:
+
+  ```bash
+  sudo systemctl status mongod --no-pager
+  ```
+
 - The Ops Manager service is running:
 
   ```bash
-  sudo service mongodb-mms status
+  sudo systemctl status mongodb-mms --no-pager
   ```
 
 - The Ops Manager web console loads at `http://<OpsManagerHost>:<Port>` and you can sign in with the first user you created.
@@ -538,8 +582,25 @@ Confirm the setup works:
 
 ## Troubleshooting
 
-- **Console does not load**: confirm the Ops Manager service started (`sudo service mongodb-mms status`) and that port 8080/8443 is reachable through any firewall or security group.
+- **Console does not load**: confirm the Ops Manager service started (`sudo systemctl status mongodb-mms --no-pager`) and that port 8080/8443 is reachable through any firewall or security group.
 - **Ops Manager cannot reach the Application Database**: confirm `mongod` is running on `127.0.0.1:27017` and that you did not change the default connection string in `conf-mms.properties`.
-- **Port conflict on 27017**: make sure you disabled any pre-existing `mongod` service (see step 3).
+- **Application Database crashes with "Too many open files" / `WT_PANIC`**: the `mongod`
+  log shows `error 24` ("Too many open files") followed by a WiredTiger `WT_PANIC` and the
+  process aborting. This means `mongod` is running with too low an open-files limit — the
+  RHEL default of `1024`, which happens when `mongod` is started by hand from a shell
+  instead of through systemd. Start it through the service unit, which sets
+  `LimitNOFILE=64000`:
+
+  ```bash
+  sudo systemctl enable --now mongod
+  ```
+
+  Then confirm the limit took effect (**Max open files** should read `64000`):
+
+  ```bash
+  cat /proc/$(pgrep -x mongod)/limits | grep "Max open files"
+  ```
+
+- **Port conflict on 27017**: make sure no stray `mongod` is already running before you start the service (`pgrep -ax mongod`; see step 4).
 - **Low `/tmp` warning**: ensure at least 20 GiB is free in `/tmp`.
 - **Agent cannot connect later**: confirm the managed host can reach `opsmgr-1` on 8080/8443 and that `opsmgr-1` can reach the managed `mongod` on 27017.
