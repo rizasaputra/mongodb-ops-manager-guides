@@ -9,6 +9,7 @@ Follow them in order; the numbers indicate the intended sequence.
 | # | Guide | What it covers |
 |---|-------|----------------|
 | 00 | [Install Ops Manager](00-install-ops-manager.md) | Install Ops Manager and its Application Database on a single test host, including infrastructure (VMs, ports, FQDN, NTP). |
+| 05 | [Upgrade Ops Manager 8.0 to 9.0](05-upgrade-ops-manager.md) | Upgrade the single-host Ops Manager Application in place from the 8.0 series to 9.0 via RPM, then update the agents. |
 | 10 | [Provision a new replica set](10-provision-new.md) | Use Ops Manager automation to deploy a brand-new MongoDB replica set onto empty nodes (Project A). |
 | 20 | [Monitor new & test alerting](20-monitoring-new-and-alerting.md) | Enable monitoring on the new replica set, watch metrics, and configure/trigger an alert that notifies a Telegram bot via webhook. |
 | 25 | [Monitor existing & Performance Advisor](25-monitoring-existing.md) | Attach Ops Manager to an existing production replica set (Project B) for monitoring and Performance Advisor. |
