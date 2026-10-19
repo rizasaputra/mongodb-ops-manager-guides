@@ -40,6 +40,144 @@ This guide assumes you completed `00-install-ops-manager.md` and have a running 
 
   The result should be a unique FQDN such as `new-1.example.dev`, resolvable from the other hosts (via DNS or `/etc/hosts`).
 
+## Air-gapped nodes (no Internet on the DB hosts)
+
+The steps below assume Ops Manager, the new nodes, and (if used) the Backup Daemon can
+reach the public Internet to download MongoDB binaries. That is **Remote Mode**, the
+default. If your database nodes have no Internet access, you must change where the agents
+get the MongoDB binaries from — otherwise the deploy in step 5 stalls, because Ops Manager
+tells each node to download the MongoDB binaries and the node cannot reach
+`downloads.mongodb.com`.
+
+Ops Manager offers three download modes (set this before you deploy):
+
+- **Remote Mode** (default) — Ops Manager, the nodes, and the Backup Daemon all pull
+  binaries over the Internet (or from an internal HTTP/HTTPS mirror you host). Use this
+  only if the nodes have outbound access.
+- **Hybrid Mode** — only the Ops Manager host has Internet. Ops Manager downloads the
+  binaries, and the Agents on the air-gapped nodes download them from Ops Manager. Use
+  this when `opsmgr-1` can reach the Internet but the DB nodes cannot.
+- **Local Mode** — no host has Internet at all. You manually load the MongoDB binary
+  archives onto the Ops Manager host, and the Agents and Backup Daemon download them from
+  Ops Manager. Use this for a fully air-gapped environment.
+
+For a test environment where `opsmgr-1` has Internet but `new-1/2/3` do not, **Hybrid
+Mode** is the least work. For a fully disconnected environment, use **Local Mode**. Both
+are configured on the Ops Manager host, not on the nodes.
+
+See the official docs for [Configure Deployment to Have Limited Internet Access](https://www.mongodb.com/docs/ops-manager/current/tutorial/configure-local-mode/)
+and [Update Version Manifest Manually](https://www.mongodb.com/docs/ops-manager/current/tutorial/update-version-manifest/).
+
+### Option A — Hybrid Mode (only Ops Manager has Internet)
+
+1. On `opsmgr-1`, open the Ops Manager configuration properties file. For an rpm/deb
+   install it is at:
+
+   ```bash
+   sudo vi /opt/mongodb/mms/conf/conf-mms.properties
+   ```
+
+   (For a `.tar.gz` install it is `<install-directory>/conf/conf-mms.properties`.)
+2. Set the binary source to hybrid:
+
+   ```properties
+   automation.versions.source=hybrid
+   ```
+
+3. Restart Ops Manager so the change takes effect:
+
+   ```bash
+   sudo systemctl restart mongodb-mms
+   ```
+
+4. Because `opsmgr-1` still has Internet, the version manifest updates automatically — no
+   manual manifest step is needed. Continue with the normal Steps below; when you deploy
+   in step 5, the Agents on the nodes pull the binaries from Ops Manager instead of the
+   Internet.
+
+### Option B — Local Mode (fully air-gapped, no host has Internet)
+
+In Local Mode you supply everything by hand. Do this on `opsmgr-1` before deploying.
+
+1. **Choose a versions directory** and point Ops Manager at it. Edit
+   `/opt/mongodb/mms/conf/conf-mms.properties` on `opsmgr-1`:
+
+   ```properties
+   automation.versions.source=local
+   automation.versions.directory=/opt/mongodb/mms/mongodb-releases/
+   ```
+
+   The `automation.versions.directory` is where Ops Manager looks for the MongoDB binary
+   archives it will serve to the Agents. Create it if it does not exist:
+
+   ```bash
+   sudo mkdir -p /opt/mongodb/mms/mongodb-releases
+   ```
+
+2. **Download the MongoDB binary archives** you intend to deploy. From a machine that
+   *does* have Internet, download the MongoDB 8.0 **Enterprise** Linux archive(s) that
+   match your node platform (RHEL 9 / x86_64) from the MongoDB download site, then copy
+   the `.tgz` files into the versions directory on `opsmgr-1`:
+
+   ```bash
+   # on a connected machine, then scp to opsmgr-1:/opt/mongodb/mms/mongodb-releases/
+   curl -OL "https://downloads.mongodb.com/linux/mongodb-linux-x86_64-enterprise-rhel90-<version>.tgz"
+   ```
+
+   - `<version>` — the exact MongoDB 8.0 Enterprise build you want to deploy, e.g. `8.0.4`.
+   - Leave the archives as downloaded `.tgz` files in the directory; do not extract them.
+     Ops Manager handles extraction. (If you do extract any, make sure the resulting
+     `mongod` keeps its executable bit — an overly strict `chmod` on the directory can
+     break Backup Daemon's initial sync.)
+
+3. **Fix ownership** so the `mongodb-mms` service user can read the archives:
+
+   ```bash
+   sudo chown -R mongodb-mms:mongodb-mms /opt/mongodb/mms/mongodb-releases
+   ```
+
+4. **Update the version manifest manually.** In Local Mode Ops Manager cannot refresh the
+   list of installable versions on its own, so you give it the manifest by hand:
+   - From a computer that can reach both the Internet and your Ops Manager host, download
+     the current version manifest JSON that matches your Ops Manager version from the
+     MongoDB documentation/download site.
+   - In the Ops Manager console, click **Admin** (upper-right), then the **General** tab,
+     then **Version Manifest**.
+   - Paste the manifest contents into the text box and click **Submit MongoDB Version
+     Manifest**. On success the "last updated" timestamp changes to the current date/time.
+
+   Only versions that are both in the manifest **and** present as archives in the versions
+   directory can actually be deployed.
+
+5. **Restart Ops Manager** and let the pre-flight check run:
+
+   ```bash
+   sudo systemctl restart mongodb-mms
+   ```
+
+   On start in Local Mode, Ops Manager runs a pre-flight check that verifies the binary
+   archives for the needed MongoDB versions (at least one matching platform) are present
+   in the versions directory. If archives are missing it fails the check and refuses to
+   start. If that happens, either add the missing archives, or temporarily set
+   `automation.versions.source=remote`, start Ops Manager, narrow the supported versions,
+   then remove that line to return to Local Mode. See
+   [Resolve Pre-flight Check Failure](https://www.mongodb.com/docs/ops-manager/current/tutorial/resolve-pre-flight-check/).
+
+> **The Agent install still needs its own offline handling.** Local/Hybrid Mode only
+> changes where the *MongoDB server* binaries come from. The MongoDB **Agent** `.rpm`
+> (step 4) and the Enterprise OS dependencies normally come from the Internet too. On
+> air-gapped nodes, download the Agent `.rpm` and the required RHEL 9 dependency packages
+> on a connected machine, copy them to each node, and install them with
+> `sudo dnf install -y ./<package>.rpm` (which resolves from local files). The Agent
+> `.rpm` itself is also downloadable directly from your Ops Manager host — the URL in the
+> **Downloads & Settings** pop-up (step 3) points at `opsmgr-1`, which the nodes can
+> reach, so that part works even without Internet.
+
+With the download mode set, continue with the Steps below as written. The only practical
+difference during the deploy is that binaries are served from Ops Manager (or the versions
+directory) instead of the Internet, so the first deploy is limited by your LAN speed
+rather than your Internet link.
+
 ## Steps
 
 Steps 1-3 are done in the Ops Manager web console. Step 4 is run on each new node. Steps 5-6 return to the console.
